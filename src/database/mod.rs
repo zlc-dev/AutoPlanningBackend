@@ -31,10 +31,10 @@ pub mod prelude {
 }
 
 pub mod mark {
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct MariaDB;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct MySql;
 
     impl super::DataBaseType for MariaDB {}

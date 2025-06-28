@@ -23,7 +23,10 @@ mod database;
 use database::prelude::*;
 mod model;
 use model::user::user_router;
+
+use crate::server::auth::auth_router;
 mod util;
+mod server;
 
 const DATABASE_URL: DataBaseUrl<'_, mark::MariaDB> = DataBaseUrl::<'_, mark::MariaDB>::new(
     DataBaseConfig {
@@ -38,13 +41,16 @@ const DATABASE_URL: DataBaseUrl<'_, mark::MariaDB> = DataBaseUrl::<'_, mark::Mar
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let pool = MySqlPool::connect(&DATABASE_URL.get_url()).await?;
-
+                                                                                                   
     // initialize tracing
     tracing_subscriber::fmt::init();
-    let app = Router::new()
-        .nest("/users", user_router(pool.clone()));
+    
+    let pool = MySqlPool::connect(&DATABASE_URL.get_url()).await?;
 
+    let app = Router::new()
+        .nest("/users", user_router(pool.clone()))
+        .nest("/auth", auth_router(pool));
+    
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
     

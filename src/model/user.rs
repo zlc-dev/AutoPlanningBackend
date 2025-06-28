@@ -1,5 +1,5 @@
 /*
-*   model::error
+*   model::user
 *   Copyright (C) 2025 zlc
 *
 *   This program is free software: you can redistribute it and/or modify
@@ -17,9 +17,9 @@
 */
 
 use axum::{extract::{Query, State}, http::StatusCode, routing::post, Json, Router};
-use sqlx::{prelude::*, MySqlPool};
-use serde::{Serialize, Deserialize};
-use crate::util::error::internal_error;
+use sqlx::{prelude::*, types::chrono, MySqlPool};
+use serde::{Deserialize, Serialize};
+use crate::util::{error::internal_error, password::{PasswordProperties, PasswordWithRandomSalt, PasswordWithSalt, StringPassword}};
 
 // 用户数据库模型
 #[derive(Debug, sqlx::FromRow, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub struct User {
     pub id: i32,
     pub name: String,
     pub password_hash: String,
-    pub created_at: sqlx::types::chrono::NaiveDateTime
+    pub created_at: chrono::NaiveDateTime
 }
 
 pub fn user_router(pool: MySqlPool) -> Router {
@@ -36,22 +36,32 @@ pub fn user_router(pool: MySqlPool) -> Router {
         .with_state(pool)
 }
 
+#[derive(Debug)]
+pub struct UserPasswordProperties;
+
+impl PasswordProperties for UserPasswordProperties {}
+
+impl PasswordWithSalt for UserPasswordProperties {
+    const COST: u32 = 12;
+    const SALT: [u8; 16] = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3];
+}
+
+impl PasswordWithRandomSalt for UserPasswordProperties {
+    const COST: u32 = <Self as PasswordWithSalt>::COST;
+}
+
+type UserPassword = StringPassword<UserPasswordProperties>;
+
 #[derive(Debug, Deserialize)]
 struct CreateUserRequest {
     name: String,
-    password: String,
+    password: UserPassword,
 }
 
 async fn create_user(
     State(pool): State<MySqlPool>, Json(payload): Json<CreateUserRequest>
 ) -> Result<String, (StatusCode, String)> {
-    let password_hash = bcrypt::hash_with_salt(
-            payload.password, 
-            5, 
-            [0; 16]
-        )
-        .map_err(internal_error)?
-        .to_string();
+    let password_hash = payload.password.hash_with_random_salt().map_err(internal_error)?;
 
     sqlx::query("INSERT INTO user (name, password_hash) VALUES (?,?)")
         .bind(payload.name)
@@ -100,3 +110,5 @@ async fn query_user(
         }).collect())
     )
 }
+
+
