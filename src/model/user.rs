@@ -30,10 +30,9 @@ pub struct User {
     pub created_at: chrono::NaiveDateTime
 }
 
-pub fn user_router(pool: MySqlPool) -> Router {
+pub fn user_router() -> Router<MySqlPool> {
     Router::new()
         .route("/", post(create_user).get(query_user))
-        .with_state(pool)
 }
 
 #[derive(Debug)]

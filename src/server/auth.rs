@@ -16,7 +16,7 @@
 *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{fmt::Display, sync::LazyLock};
+use std::{fmt::Display, ops::Deref};
 
 use axum::{extract::{FromRequestParts, State}, http::StatusCode, response::IntoResponse, routing::{get, post}, Json, RequestPartsExt, Router};
 use axum_extra::{headers::{authorization::Bearer, Authorization}, TypedHeader};
@@ -24,11 +24,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 
-pub fn auth_router(pool: sqlx::MySqlPool) -> Router{
-    Router::new()
+use crate::util::keys::AuthKeys;
+
+pub fn auth_router<D, K>() -> Router<(sqlx::MySqlPool, D)> 
+    where D: Deref<Target = K> + Clone + Send + Sync + 'static,
+          K: AuthKeys + 'static {
+    Router::<(sqlx::MySqlPool, D)>::new()
         .route("/authorize", post(authorize))
         .route("/protected", get(protected))
-        .with_state(pool)
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,24 +81,6 @@ impl IntoResponse for AuthError {
     }
 }
 
-struct Keys {
-    encoding: jsonwebtoken::EncodingKey,
-    decoding: jsonwebtoken::DecodingKey,
-}
-
-impl Keys {
-    fn new(secret: &[u8]) -> Self {
-        Self {
-            encoding: jsonwebtoken::EncodingKey::from_secret(secret),
-            decoding: jsonwebtoken::DecodingKey::from_secret(secret),
-        }
-    }
-}
-
-static KEYS: LazyLock<Keys> = LazyLock::new(|| {
-    let secret = "Free as in Freedom";
-    Keys::new(secret.as_bytes())
-});
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -119,10 +104,11 @@ impl Display for Claims {
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for Claims {
+impl<D, T> FromRequestParts<(sqlx::MySqlPool, D)> for Claims
+    where D: Deref<Target = T> + Send + Sync, T: AuthKeys {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut axum::http::request::Parts, _state: &S) -> Result<Self, Self::Rejection>  {
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &(sqlx::MySqlPool, D)) -> Result<Self, Self::Rejection>  {
         let TypedHeader(Authorization(bearer)) = parts
             .extract::<TypedHeader<Authorization<Bearer>>>()
             .await
@@ -131,7 +117,7 @@ impl<S: Send + Sync> FromRequestParts<S> for Claims {
         let validation = &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
         
         let token_date = jsonwebtoken::decode::<Claims>(
-            bearer.token(), &KEYS.decoding, &validation 
+            bearer.token(), state.1.get_decoding(), &validation 
         ).map_err(|_| AuthError::InvalidToken)?;
         if token_date.claims.exp <= chrono::Utc::now().timestamp() {
             return Err(AuthError::InvalidToken);
@@ -140,7 +126,7 @@ impl<S: Send + Sync> FromRequestParts<S> for Claims {
     }
 }
 
-async fn authorize(State(pool): State<sqlx::MySqlPool>, Json(payload): Json<AuthPayload>) -> Result<Json<AuthBody>, AuthError> {
+async fn authorize(State((pool, keys)): State<(sqlx::MySqlPool, impl Deref<Target = impl AuthKeys>)>, Json(payload): Json<AuthPayload>) -> Result<Json<AuthBody>, AuthError> {
 
     let query = match payload {
         AuthPayload { password: password_hash, .. } if password_hash.is_empty() => {
@@ -177,7 +163,7 @@ async fn authorize(State(pool): State<sqlx::MySqlPool>, Json(payload): Json<Auth
     };
 
     // Create the authorization token
-    let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &claims, &KEYS.encoding)
+    let token = jsonwebtoken::encode(&jsonwebtoken::Header::default(), &claims, keys.get_encoding())
         .map_err(|_| AuthError::TokenCreation)?;
 
     return Ok(Json(AuthBody::new(token)));

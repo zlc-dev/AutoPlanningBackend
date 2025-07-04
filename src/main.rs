@@ -16,6 +16,8 @@
 *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::{ops::Deref, sync::LazyLock};
+
 use axum::Router;
 use sqlx::MySqlPool;
 
@@ -24,7 +26,7 @@ use database::prelude::*;
 mod model;
 use model::user::user_router;
 
-use crate::server::auth::auth_router;
+use crate::{server::auth::auth_router, util::keys};
 mod util;
 mod server;
 
@@ -39,20 +41,28 @@ const DATABASE_URL: DataBaseUrl<'_, mark::MariaDB> = DataBaseUrl::<'_, mark::Mar
     }
 );
 
+static KEYS: LazyLock<keys::Keys> = LazyLock::new(|| {
+    // todo: 不应把密码写在代码中
+    let secret = "Free as in Freedom";
+    keys::Keys::new(secret.as_bytes())
+});
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-                                                                                                   
+
     // initialize tracing
     tracing_subscriber::fmt::init();
-    
-    let pool = MySqlPool::connect(&DATABASE_URL.get_url()).await?;
 
+    let pool = MySqlPool::connect(&DATABASE_URL.get_url()).await?;
+    
     let app = Router::new()
-        .nest("/users", user_router(pool.clone()))
-        .nest("/auth", auth_router(pool));
-    
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-    
+        .nest("/users", user_router())
+        .with_state(pool.clone())
+        .nest("/auth", auth_router())
+        .with_state((pool, KEYS.deref()));
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+
     Ok(())
 }
