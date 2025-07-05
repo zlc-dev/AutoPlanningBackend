@@ -15,8 +15,9 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
+#![feature(allocator_api)]
 
-use std::{ops::Deref, sync::LazyLock};
+use std::sync::LazyLock;
 
 use axum::Router;
 use sqlx::MySqlPool;
@@ -59,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/users", user_router())
         .with_state(pool.clone())
         .nest("/auth", auth_router())
-        .with_state((pool, KEYS.deref()));
+        .with_state((pool, &KEYS));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;

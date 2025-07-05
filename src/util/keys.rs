@@ -16,11 +16,26 @@
 *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::ops::Deref;
+
 pub trait AuthKeys {
     fn get_encoding(&self) -> &jsonwebtoken::EncodingKey;
     fn get_decoding(&self) -> &jsonwebtoken::DecodingKey;
 }
 
+impl<T> AuthKeys for T
+where 
+    T: Deref,
+    <T as Deref>::Target: AuthKeys
+{
+    fn get_encoding(&self) -> &jsonwebtoken::EncodingKey {
+        self.deref().get_encoding()
+    }
+
+    fn get_decoding(&self) -> &jsonwebtoken::DecodingKey {
+        self.deref().get_decoding()
+    }
+}
 
 pub struct Keys {
     encoding: jsonwebtoken::EncodingKey,

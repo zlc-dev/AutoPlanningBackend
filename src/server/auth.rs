@@ -16,7 +16,7 @@
 *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{fmt::Display, ops::Deref};
+use std::fmt::Display;
 
 use axum::{extract::{FromRequestParts, State}, http::StatusCode, response::IntoResponse, routing::{get, post}, Json, RequestPartsExt, Router};
 use axum_extra::{headers::{authorization::Bearer, Authorization}, TypedHeader};
@@ -26,10 +26,11 @@ use sqlx::Row;
 
 use crate::util::keys::AuthKeys;
 
-pub fn auth_router<D, K>() -> Router<(sqlx::MySqlPool, D)> 
-    where D: Deref<Target = K> + Clone + Send + Sync + 'static,
-          K: AuthKeys + 'static {
-    Router::<(sqlx::MySqlPool, D)>::new()
+pub fn auth_router<D>() -> Router<(sqlx::MySqlPool, D)> 
+where 
+    D: AuthKeys + Clone + Send + Sync + 'static 
+{
+    Router::new()
         .route("/authorize", post(authorize))
         .route("/protected", get(protected))
 }
@@ -104,11 +105,11 @@ impl Display for Claims {
     }
 }
 
-impl<D, T> FromRequestParts<(sqlx::MySqlPool, D)> for Claims
-    where D: Deref<Target = T> + Send + Sync, T: AuthKeys {
+impl<T> FromRequestParts<(sqlx::MySqlPool, T)> for Claims
+where T: AuthKeys + Send + Sync {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &(sqlx::MySqlPool, D)) -> Result<Self, Self::Rejection>  {
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &(sqlx::MySqlPool, T)) -> Result<Self, Self::Rejection>  {
         let TypedHeader(Authorization(bearer)) = parts
             .extract::<TypedHeader<Authorization<Bearer>>>()
             .await
@@ -126,7 +127,7 @@ impl<D, T> FromRequestParts<(sqlx::MySqlPool, D)> for Claims
     }
 }
 
-async fn authorize(State((pool, keys)): State<(sqlx::MySqlPool, impl Deref<Target = impl AuthKeys>)>, Json(payload): Json<AuthPayload>) -> Result<Json<AuthBody>, AuthError> {
+async fn authorize(State((pool, keys)): State<(sqlx::MySqlPool, impl AuthKeys)>, Json(payload): Json<AuthPayload>) -> Result<Json<AuthBody>, AuthError> {
 
     let query = match payload {
         AuthPayload { password: password_hash, .. } if password_hash.is_empty() => {
